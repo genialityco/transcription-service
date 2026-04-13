@@ -1,0 +1,32 @@
+# Binario compilado y fuentes temporales de whisper.cpp
+build/
+_whisper_src/
+
+# Modelos (archivos grandes, no van en git)
+models/
+
+# Archivos temporales del servicio
+downloads/
+samples/
+outputs/
+
+# Archivos de audio/video temporales
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.webm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Entorno
+.env
+
+# Herramientas locales
+.claude/
+.qodo/
