@@ -13,21 +13,21 @@ Recibe una URL de video, la descarga, la transcribe y expone el resultado via HT
 | Python      | 3.10+         | Ejecutar el servicio Flask |
 | cmake       | 3.16+         | Compilar whisper.cpp |
 | ffmpeg      | 4.x+          | Convertir video a WAV |
-| jq          | 1.6+          | Parsear JSON del output de whisper |
 | yt-dlp      | cualquiera    | Descargar videos (Vimeo, YouTube, etc.) |
 | wget        | cualquiera    | Descargar el modelo (solo setup.sh) |
 
 En Ubuntu/Debian:
 ```bash
-sudo apt install cmake ffmpeg jq wget python3 python3-pip yt-dlp
+sudo apt install cmake ffmpeg wget python3 python3-pip yt-dlp
 ```
 
 ---
 
-## Instalación
+## Instalación local
 
 ```bash
-# 1. Clonar / copiar el proyecto
+# 1. Clonar el proyecto
+git clone https://github.com/tu-usuario/transcription-service.git
 cd transcription-service
 
 # 2. Setup: compila whisper.cpp, descarga el modelo e instala dependencias Python
@@ -57,7 +57,7 @@ WHISPER_MODEL_NAME=ggml-medium.bin bash setup.sh
 
 ---
 
-## Iniciar el servicio
+## Iniciar el servicio (desarrollo)
 
 ```bash
 python3 app.py
@@ -166,75 +166,145 @@ Healthcheck del servicio.
 
 ## Probar con curl
 
-### Healthcheck
 ```bash
+# Healthcheck
 curl http://localhost:5001/health
-```
 
-### Encolar una transcripción
-```bash
+# Encolar una transcripción
 curl -X POST http://localhost:5001/transcribe \
   -H "Content-Type: application/json" \
   -d '{"video_url": "https://vimeo.com/123456789", "activity_id": "actividad-42"}'
-```
 
-Guarda el `job_id` de la respuesta para los siguientes pasos.
-
-### Consultar estado
-```bash
+# Consultar estado (reemplaza <job_id>)
 curl http://localhost:5001/transcribe/<job_id>/status
-```
 
-### Obtener resultado (polling manual)
-```bash
+# Obtener resultado
 curl http://localhost:5001/transcribe/<job_id>/result
 ```
-
-### Script de polling automático
-```bash
-JOB_ID="<job_id>"
-while true; do
-  RESPONSE=$(curl -s http://localhost:5001/transcribe/$JOB_ID/result)
-  STATUS=$(echo $RESPONSE | jq -r '.status')
-  echo "Status: $STATUS"
-  if [ "$STATUS" = "done" ] || [ "$STATUS" = "error" ]; then
-    echo "$RESPONSE" | jq .
-    break
-  fi
-  sleep 10
-done
-```
-
----
-
-## Probar con Postman
-
-1. **Importar colección** — crea una colección con las siguientes requests:
-
-   | Método | URL | Body |
-   |--------|-----|------|
-   | POST | `http://localhost:5001/transcribe` | JSON con `video_url` y `activity_id` |
-   | GET  | `http://localhost:5001/transcribe/{{job_id}}/status` | — |
-   | GET  | `http://localhost:5001/transcribe/{{job_id}}/result` | — |
-   | GET  | `http://localhost:5001/health` | — |
-
-2. **Guardar `job_id` automáticamente** — en el POST `/transcribe`, agregar en la pestaña *Tests*:
-   ```javascript
-   const res = pm.response.json();
-   pm.collectionVariables.set("job_id", res.job_id);
-   ```
-   Así las requests de status y result usan `{{job_id}}` automáticamente.
 
 ---
 
 ## Docker
 
+### Build local
+
 ```bash
-# Requiere tener ./models/ con el modelo descargado antes de hacer build
-bash setup.sh   # solo para descargar el modelo, o copiarlo manualmente
+# El modelo debe estar en ./models/ antes del build
+# Si no lo tienes, ejecuta: bash setup.sh
 
 docker build -t transcription-service .
-docker run -p 5001:5001 transcription-service
+docker run -d -p 5001:5001 transcription-service
+```
+
+### Build con modelo externo (sin incluirlo en la imagen)
+
+```bash
+docker run -d \
+  -p 5001:5001 \
+  -v /ruta/local/models:/app/models \
+  -e WHISPER_LANG=es \
+  transcription-service
+```
+
+---
+
+## Despliegue en Digital Ocean (Droplet)
+
+### 1. Crear el Droplet
+
+- **Image**: Ubuntu 22.04 LTS
+- **Plan mínimo recomendado**: 4 GB RAM / 2 vCPUs / 80 GB SSD (~$24/mes)
+- **Authentication**: SSH Key
+
+### 2. Instalar Docker en el Droplet
+
+```bash
+ssh root@<IP_DEL_DROPLET>
+curl -fsSL https://get.docker.com | sh
+```
+
+### 3. Subir el modelo al Droplet
+
+El modelo no está en git (pesa ~1.1 GB). Súbelo una sola vez:
+
+```bash
+# Desde tu máquina local
+scp ./models/ggml-large-v3-q5_0.bin root@<IP_DEL_DROPLET>:/root/models/
+```
+
+### 4. Clonar el repositorio y hacer el build
+
+```bash
+# En el Droplet
+git clone https://github.com/tu-usuario/transcription-service.git /app
+cd /app
+
+mkdir -p models
+cp /root/models/ggml-large-v3-q5_0.bin ./models/
+
+# Build (tarda ~5-10 min, compila whisper.cpp desde cero)
+docker build -t transcription-service .
+```
+
+### 5. Correr el contenedor
+
+```bash
+docker run -d \
+  --name transcription \
+  --restart unless-stopped \
+  -p 80:5001 \
+  -e WHISPER_LANG=es \
+  transcription-service
+
+# Verificar
+docker logs -f transcription
+curl http://localhost/health
+```
+
+### 6. Configurar firewall
+
+```bash
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw enable
+```
+
+### 7. (Opcional) HTTPS con Nginx + Certbot
+
+```bash
+apt install -y nginx certbot python3-certbot-nginx
+
+cat > /etc/nginx/sites-available/transcription <<'EOF'
+server {
+    server_name tu-dominio.com;
+    location / {
+        proxy_pass http://localhost:5001;
+        proxy_set_header Host $host;
+        proxy_read_timeout 600s;
+    }
+}
+EOF
+
+ln -s /etc/nginx/sites-available/transcription /etc/nginx/sites-enabled/
+nginx -t && systemctl reload nginx
+certbot --nginx -d tu-dominio.com
+```
+
+### Actualizar el servicio
+
+```bash
+# En el Droplet
+cd /app
+git pull
+docker build -t transcription-service .
+docker stop transcription && docker rm transcription
+docker run -d \
+  --name transcription \
+  --restart unless-stopped \
+  -p 80:5001 \
+  -e WHISPER_LANG=es \
+  transcription-service
 ```
 
 ---
@@ -244,8 +314,8 @@ docker run -p 5001:5001 transcription-service
 | Variable | Default | Descripción |
 |----------|---------|-------------|
 | `PORT` | `5001` | Puerto del servidor Flask |
-| `WHISPER_BIN` | `./build/bin/whisper-cli` | Path al binario compilado |
-| `WHISPER_MODEL` | `./models/ggml-large-v3-q5_0.bin` | Path al modelo ggml |
+| `WHISPER_BIN` | `/app/build/bin/whisper-cli` | Path al binario compilado |
+| `WHISPER_MODEL` | `/app/models/ggml-large-v3-q5_0.bin` | Path al modelo ggml |
 | `WHISPER_LANG` | `es` | Idioma de transcripción |
 
 ---
@@ -259,12 +329,13 @@ transcription-service/
 ├── queue_worker.py     # Worker: procesa jobs en background
 ├── transcriber.py      # Descarga de video + parseo de segmentos
 ├── transcribir.sh      # Conversión WAV + ejecución de whisper-cli
-├── setup.sh            # Instala binario, modelo y dependencias
+├── setup.sh            # Instala binario, modelo y dependencias (desarrollo local)
 ├── requirements.txt
 ├── Dockerfile
+├── .dockerignore
 ├── .env.example
-├── build/              # Generado por setup.sh (whisper-cli)
-└── models/             # Generado por setup.sh (modelo ggml)
+├── models/             # No incluido en git ni en Docker build (se copia manualmente)
+└── build/              # Generado dentro del contenedor Docker
 ```
 
 ---
@@ -275,7 +346,7 @@ transcription-service/
 POST /transcribe
       │
       ▼
-  job_queue (Queue)
+  job_queue (Queue en memoria)
       │
       ▼
   worker thread
@@ -283,9 +354,10 @@ POST /transcribe
       ├── ffmpeg          → convierte a WAV 16kHz mono
       ├── whisper-cli     → transcribe → <uuid>.wav.json
       └── job_results     → almacena segmentos en memoria
-      
+
 GET /transcribe/<id>/result
       │
       └── lee job_results → devuelve segmentos al cliente
 ```
-# transcription-service
+
+> **Nota**: la cola de jobs es en memoria. Si el contenedor se reinicia, los jobs en curso se pierden. Para producción con alta disponibilidad, reemplazar con Redis + Celery.

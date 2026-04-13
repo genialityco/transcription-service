@@ -41,4 +41,5 @@ ENV PORT=5001
 EXPOSE 5001
 
 # ─── ARRANCAR ──────────────────────────────────────────────────────────────────
-CMD ["python3", "app.py"]
+# Gunicorn con 1 worker para mantener la cola en memoria compartida
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--workers", "1", "--threads", "4", "--timeout", "600", "app:app"]

@@ -1,0 +1,36 @@
+# Git
+.git/
+.gitignore
+
+# Binario compilado localmente (se compila dentro del contenedor)
+build/
+_whisper_src/
+
+# Archivos temporales del servicio
+downloads/
+samples/
+outputs/
+
+# Archivos de audio/video
+*.mp4
+*.mp3
+*.wav
+*.m4a
+*.webm
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Entorno local
+.env
+
+# Herramientas locales
+.claude/
+.qodo/
+
+# Docs y CI
+README.md
