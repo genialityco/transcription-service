@@ -2,9 +2,10 @@
 .git/
 .gitignore
 
-# Binario compilado localmente (se compila dentro del contenedor)
+# Binario y modelo (se compilan/descargan dentro del contenedor)
 build/
 _whisper_src/
+models/
 
 # Archivos temporales del servicio
 downloads/

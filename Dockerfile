@@ -28,8 +28,12 @@ COPY transcriber.py .
 COPY transcribir.sh .
 RUN chmod +x transcribir.sh
 
-# ─── MODELO (debe existir localmente antes de hacer docker build) ───────────────
-COPY models/ /app/models/
+# ─── MODELO (se descarga desde Hugging Face durante el build) ─────────────────
+ARG WHISPER_MODEL_NAME=ggml-large-v3-q5_0.bin
+RUN mkdir -p /app/models && \
+    wget -q --show-progress \
+      -O /app/models/${WHISPER_MODEL_NAME} \
+      https://huggingface.co/ggerganov/whisper.cpp/resolve/main/${WHISPER_MODEL_NAME}
 
 # ─── VARIABLES DE ENTORNO POR DEFECTO ─────────────────────────────────────────
 ENV WHISPER_BIN=/app/build/bin/whisper-cli
