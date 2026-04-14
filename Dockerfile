@@ -7,8 +7,9 @@ WORKDIR /app
 # ─── DEPENDENCIAS DE SISTEMA ───────────────────────────────────────────────────
 RUN apt-get update && apt-get install -y \
     git cmake build-essential ffmpeg curl wget jq \
-    python3 python3-pip yt-dlp \
-    && rm -rf /var/lib/apt/lists/*
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip3 install --no-cache-dir -U yt-dlp
 
 # ─── COMPILAR WHISPER.CPP ──────────────────────────────────────────────────────
 RUN git clone --depth=1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper_src && \
