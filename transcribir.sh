@@ -47,7 +47,8 @@ if [ $? -ne 0 ]; then
 fi
 
 # Ejecutar transcripción
-"$WHISPER_BIN" -m "$MODEL_PATH" -f "$WAV_PATH" -otxt -osrt -oj -l "$LANGUAGE" > /dev/null 2>&1
+THREADS="${WHISPER_THREADS:-8}"
+"$WHISPER_BIN" -m "$MODEL_PATH" -f "$WAV_PATH" -otxt -osrt -oj -l "$LANGUAGE" -t "$THREADS" > /dev/null 2>&1
 
 if [ ! -f "$SEGMENTS_FILE" ]; then
   echo "{\"error\": \"No se generó el archivo JSON: $SEGMENTS_FILE\"}" >&2
