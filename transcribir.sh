@@ -47,7 +47,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Ejecutar transcripción
-THREADS="${WHISPER_THREADS:-8}"
+THREADS="${WHISPER_THREADS:-16}"
 "$WHISPER_BIN" -m "$MODEL_PATH" -f "$WAV_PATH" -otxt -osrt -oj -l "$LANGUAGE" -t "$THREADS" > /dev/null 2>&1
 
 if [ ! -f "$SEGMENTS_FILE" ]; then
