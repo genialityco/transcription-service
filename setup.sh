@@ -32,7 +32,11 @@ if [ -f "$SCRIPT_DIR/models/$MODEL_NAME" ]; then
   echo "    Modelo ya existe, omitiendo descarga."
 else
   echo "    Descargando desde Hugging Face (puede tardar varios minutos)..."
-  wget -q --show-progress -O "$SCRIPT_DIR/models/$MODEL_NAME" "$MODEL_URL"
+  if command -v wget &>/dev/null; then
+    wget -q --show-progress -O "$SCRIPT_DIR/models/$MODEL_NAME" "$MODEL_URL"
+  else
+    curl -L --progress-bar -o "$SCRIPT_DIR/models/$MODEL_NAME" "$MODEL_URL"
+  fi
   echo "    Modelo descargado."
 fi
 
