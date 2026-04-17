@@ -1,7 +1,10 @@
 import os
 import uuid
 import threading
+from dotenv import load_dotenv
 from flask import Flask, request, jsonify
+
+load_dotenv()
 from job_queue import job_queue, job_status, job_results
 from queue_worker import worker
 
@@ -29,9 +32,13 @@ def enqueue_transcription():
     data = request.get_json(silent=True) or {}
     video_url = data.get("video_url")
     activity_id = data.get("activity_id")
+    name_activity = data.get("name_activity")
 
     if not video_url:
         return jsonify({"error": "video_url es requerido"}), 400
+
+    use_gpu = bool(data.get("use_gpu", False))
+    generate_embeddings = bool(data.get("generate_embeddings", True))
 
     job_id = str(uuid.uuid4())
     job_status[job_id] = "enqueued"
@@ -39,6 +46,9 @@ def enqueue_transcription():
         "job_id": job_id,
         "video_url": video_url,
         "activity_id": activity_id,
+        "name_activity": name_activity,
+        "use_gpu": use_gpu,
+        "generate_embeddings": generate_embeddings,
     })
 
     return jsonify({
@@ -107,6 +117,8 @@ def get_result(job_id):
     return jsonify({
         "job_id": job_id,
         "status": "done",
+        "activity_id": result.get("activity_id"),
+        "name_activity": result.get("name_activity"),
         "segments": result.get("segments", []),
     }), 200
 

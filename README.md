@@ -2,7 +2,7 @@
 
 Microservicio de transcripción de video basado en [whisper.cpp](https://github.com/ggerganov/whisper.cpp).
 
-Recibe una URL de video, la descarga, la transcribe y expone el resultado via HTTP polling. El servicio no guarda nada en base de datos — devuelve los segmentos para que el cliente los persista como prefiera.
+Recibe una URL de video, la descarga, la transcribe, opcionalmente genera embeddings con Gemini, y expone el resultado via HTTP polling. El servicio no guarda nada en base de datos — devuelve los segmentos para que el cliente los persista como prefiera.
 
 ---
 
@@ -77,14 +77,20 @@ Encola un trabajo de transcripción y devuelve un `job_id` para hacer polling.
 ```json
 {
   "video_url": "https://vimeo.com/123456789",
-  "activity_id": "abc123"
+  "activity_id": "abc123",
+  "name_activity": "Clase 1",
+  "use_gpu": false,
+  "generate_embeddings": true
 }
 ```
 
-| Campo | Tipo | Requerido | Descripción |
-|-------|------|-----------|-------------|
-| `video_url` | string | Sí | URL del video (Vimeo, YouTube, etc.) |
-| `activity_id` | string | No | Identificador propio del cliente, se devuelve en la respuesta |
+| Campo | Tipo | Requerido | Default | Descripción |
+|-------|------|-----------|---------|-------------|
+| `video_url` | string | Sí | — | URL del video (Vimeo, YouTube, etc.) |
+| `activity_id` | string | No | `null` | Identificador propio del cliente, se devuelve en el resultado |
+| `name_activity` | string | No | `null` | Nombre de la actividad, se devuelve en el resultado |
+| `use_gpu` | boolean | No | `false` | Usa GPU (CUDA) para la transcripción si está disponible |
+| `generate_embeddings` | boolean | No | `true` | Genera embeddings Gemini por cada segmento |
 
 **Respuesta `202 Accepted`:**
 ```json
@@ -130,14 +136,33 @@ Devuelve el resultado cuando el job termina. Usar para polling.
 }
 ```
 
-**Respuesta `200` — transcripción lista:**
+**Respuesta `200` — transcripción lista (con embeddings):**
 ```json
 {
   "job_id": "550e8400-...",
   "status": "done",
+  "activity_id": "abc123",
+  "name_activity": "Clase 1",
   "segments": [
-    { "startTime": 0.0,  "endTime": 3.84,  "text": "Bienvenidos al curso de introducción." },
-    { "startTime": 3.84, "endTime": 7.12,  "text": "Hoy vamos a ver los conceptos básicos." }
+    {
+      "startTime": 0.0,
+      "endTime": 3.84,
+      "text": "Bienvenidos al curso de introducción.",
+      "embedding": [0.012, -0.034, ...]
+    }
+  ]
+}
+```
+
+**Respuesta `200` — transcripción lista (sin embeddings):**
+```json
+{
+  "job_id": "550e8400-...",
+  "status": "done",
+  "activity_id": "abc123",
+  "name_activity": "Clase 1",
+  "segments": [
+    { "startTime": 0.0, "endTime": 3.84, "text": "Bienvenidos al curso de introducción." }
   ]
 }
 ```
@@ -170,10 +195,15 @@ Healthcheck del servicio.
 # Healthcheck
 curl http://localhost:5001/health
 
-# Encolar una transcripción
+# Encolar transcripción con GPU y embeddings
 curl -X POST http://localhost:5001/transcribe \
   -H "Content-Type: application/json" \
-  -d '{"video_url": "https://vimeo.com/123456789", "activity_id": "actividad-42"}'
+  -d '{"video_url": "https://vimeo.com/123456789", "activity_id": "actividad-42", "use_gpu": true, "generate_embeddings": true}'
+
+# Encolar solo transcripción (sin GPU, sin embeddings)
+curl -X POST http://localhost:5001/transcribe \
+  -H "Content-Type: application/json" \
+  -d '{"video_url": "https://vimeo.com/123456789", "use_gpu": false, "generate_embeddings": false}'
 
 # Consultar estado (reemplaza <job_id>)
 curl http://localhost:5001/transcribe/<job_id>/status
@@ -186,115 +216,84 @@ curl http://localhost:5001/transcribe/<job_id>/result
 
 ## Docker
 
-### Build local
+### Build
+
+La imagen base es `nvidia/cuda:12.3.1-devel-ubuntu22.04`, lo que permite compilar whisper.cpp con soporte CUDA.
 
 ```bash
-# El modelo debe estar en ./models/ antes del build
-# Si no lo tienes, ejecuta: bash setup.sh
-
 docker build -t transcription-service .
-docker run -d -p 5001:5001 transcription-service
 ```
 
-### Build con modelo externo (sin incluirlo en la imagen)
+### Correr con GPU
+
+```bash
+docker run -d \
+  --gpus all \
+  -p 5001:5001 \
+  --env-file .env \
+  transcription-service
+```
+
+> `--gpus all` es necesario para que `use_gpu: true` funcione. Sin este flag, el contenedor solo puede usar CPU.
+
+### Correr solo CPU (sin GPU en el host)
 
 ```bash
 docker run -d \
   -p 5001:5001 \
-  -v /ruta/local/models:/app/models \
-  -e WHISPER_LANG=es \
+  --env-file .env \
   transcription-service
 ```
 
+> Si el host no tiene GPU NVIDIA, omitir `--gpus all`. En ese caso enviar siempre `use_gpu: false` en las peticiones.
+
 ---
 
-## Despliegue en Digital Ocean (Droplet)
+## Despliegue en servidor con GPU
 
-### 1. Crear el Droplet
-
-- **Image**: Ubuntu 22.04 LTS
-- **Plan mínimo recomendado**: 4 GB RAM / 2 vCPUs / 80 GB SSD (~$24/mes)
-- **Authentication**: SSH Key
-
-### 2. Instalar Docker en el Droplet
+### 1. Instalar Docker + NVIDIA Container Toolkit
 
 ```bash
-ssh root@<IP_DEL_DROPLET>
+# Docker
 curl -fsSL https://get.docker.com | sh
+
+# NVIDIA Container Toolkit (necesario para --gpus all)
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
 ```
 
-### 3. Subir el modelo al Droplet
-
-El modelo no está en git (pesa ~1.1 GB). Súbelo una sola vez:
+### 2. Clonar y construir
 
 ```bash
-# Desde tu máquina local
-scp ./models/ggml-large-v3-q5_0.bin root@<IP_DEL_DROPLET>:/root/models/
-```
-
-### 4. Clonar el repositorio y hacer el build
-
-```bash
-# En el Droplet
 git clone https://github.com/tu-usuario/transcription-service.git /app
 cd /app
-
-mkdir -p models
-cp /root/models/ggml-large-v3-q5_0.bin ./models/
-
-# Build (tarda ~5-10 min, compila whisper.cpp desde cero)
 docker build -t transcription-service .
 ```
 
-### 5. Correr el contenedor
+### 3. Correr el contenedor
 
 ```bash
 docker run -d \
   --name transcription \
   --restart unless-stopped \
-  -p 80:5001 \
-  -e WHISPER_LANG=es \
+  --gpus all \
+  -p 5001:5001 \
+  --env-file .env \
   transcription-service
 
 # Verificar
 docker logs -f transcription
-curl http://localhost/health
-```
-
-### 6. Configurar firewall
-
-```bash
-ufw allow OpenSSH
-ufw allow 80/tcp
-ufw allow 443/tcp
-ufw enable
-```
-
-### 7. (Opcional) HTTPS con Nginx + Certbot
-
-```bash
-apt install -y nginx certbot python3-certbot-nginx
-
-cat > /etc/nginx/sites-available/transcription <<'EOF'
-server {
-    server_name tu-dominio.com;
-    location / {
-        proxy_pass http://localhost:5001;
-        proxy_set_header Host $host;
-        proxy_read_timeout 600s;
-    }
-}
-EOF
-
-ln -s /etc/nginx/sites-available/transcription /etc/nginx/sites-enabled/
-nginx -t && systemctl reload nginx
-certbot --nginx -d tu-dominio.com
+curl http://localhost:5001/health
 ```
 
 ### Actualizar el servicio
 
 ```bash
-# En el Droplet
 cd /app
 git pull
 docker build -t transcription-service .
@@ -302,8 +301,9 @@ docker stop transcription && docker rm transcription
 docker run -d \
   --name transcription \
   --restart unless-stopped \
-  -p 80:5001 \
-  -e WHISPER_LANG=es \
+  --gpus all \
+  -p 5001:5001 \
+  --env-file .env \
   transcription-service
 ```
 
@@ -317,6 +317,8 @@ docker run -d \
 | `WHISPER_BIN` | `/app/build/bin/whisper-cli` | Path al binario compilado |
 | `WHISPER_MODEL` | `/app/models/ggml-large-v3-q5_0.bin` | Path al modelo ggml |
 | `WHISPER_LANG` | `es` | Idioma de transcripción |
+| `WHISPER_THREADS` | `16` | Threads de CPU para whisper (relevante en modo CPU) |
+| `GEMINI_API_KEY` | — | API key de Google Gemini (requerida si `generate_embeddings: true`) |
 
 ---
 
@@ -329,12 +331,12 @@ transcription-service/
 ├── queue_worker.py     # Worker: procesa jobs en background
 ├── transcriber.py      # Descarga de video + parseo de segmentos
 ├── transcribir.sh      # Conversión WAV + ejecución de whisper-cli
+├── embedder.py         # Generación de embeddings con Gemini
 ├── setup.sh            # Instala binario, modelo y dependencias (desarrollo local)
 ├── requirements.txt
 ├── Dockerfile
-├── .dockerignore
 ├── .env.example
-├── models/             # No incluido en git ni en Docker build (se copia manualmente)
+├── models/             # No incluido en git (se descarga en el build Docker)
 └── build/              # Generado dentro del contenedor Docker
 ```
 
@@ -352,12 +354,13 @@ POST /transcribe
   worker thread
       ├── yt-dlp          → descarga video → downloads/<uuid>.mp4
       ├── ffmpeg          → convierte a WAV 16kHz mono
-      ├── whisper-cli     → transcribe → <uuid>.wav.json
+      ├── whisper-cli     → transcribe (CPU o GPU según use_gpu)
+      ├── embedder        → genera embeddings Gemini (si generate_embeddings=true)
       └── job_results     → almacena segmentos en memoria
 
 GET /transcribe/<id>/result
       │
-      └── lee job_results → devuelve segmentos al cliente
+      └── lee job_results → devuelve segmentos (+ embeddings si se generaron)
 ```
 
 > **Nota**: la cola de jobs es en memoria. Si el contenedor se reinicia, los jobs en curso se pierden. Para producción con alta disponibilidad, reemplazar con Redis + Celery.

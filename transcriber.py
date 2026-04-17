@@ -36,43 +36,63 @@ def time_to_seconds(t: str) -> float:
         return 0.0
 
 
-def _find_bash() -> str:
-    """Retorna la ruta a Git Bash en Windows (evita WSL bash que usa /mnt/d/)."""
-    candidates = [
-        r"C:\Program Files\Git\usr\bin\bash.exe",
-        r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
-    return "bash"  # fallback
+def _use_wsl() -> bool:
+    """Detecta si WSL está disponible en el sistema."""
+    import shutil
+    return shutil.which("wsl") is not None
 
 
-def _to_bash_path(path: str) -> str:
-    """Convierte una ruta de Windows (D:\\foo\\bar) al formato Unix para Git Bash (/d/foo/bar)."""
+def _to_wsl_path(path: str) -> str:
+    """Convierte una ruta de Windows (D:\\foo\\bar) al formato WSL (/mnt/d/foo/bar)."""
+    path = path.replace("\\", "/")
+    if len(path) >= 2 and path[1] == ":":
+        path = "/mnt/" + path[0].lower() + path[2:]
+    return path
+
+
+def _to_git_bash_path(path: str) -> str:
+    """Convierte una ruta de Windows (D:\\foo\\bar) al formato Git Bash (/d/foo/bar)."""
     path = path.replace("\\", "/")
     if len(path) >= 2 and path[1] == ":":
         path = "/" + path[0].lower() + path[2:]
     return path
 
 
-def run_transcription(video_path: str) -> list[dict]:
+def run_transcription(video_path: str, use_gpu: bool = False) -> list[dict]:
     """
     Ejecuta el script de transcripción y devuelve los segmentos estructurados.
     Cada segmento tiene: startTime, endTime (floats en segundos) y text (str).
+    Usa WSL si está disponible (necesario para binarios ELF de Linux),
+    de lo contrario usa Git Bash (requiere binario nativo Windows).
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     script_path = os.path.join(script_dir, "transcribir.sh")
 
-    bash = _find_bash()
-    command = [bash, _to_bash_path(script_path), _to_bash_path(video_path)]
-    print(f"[INFO] Ejecutando: {' '.join(command)}")
-
-    # Inyectar el PATH de Git Bash para que estén disponibles dirname, basename, etc.
     env = os.environ.copy()
-    git_usr_bin = r"C:\Program Files\Git\usr\bin"
-    git_bin = r"C:\Program Files\Git\bin"
-    env["PATH"] = git_usr_bin + os.pathsep + git_bin + os.pathsep + env.get("PATH", "")
+    env["USE_GPU"] = "1" if use_gpu else "0"
+
+    if _use_wsl():
+        print("[INFO] Usando WSL para ejecutar transcribir.sh")
+        command = [
+            "wsl", "bash",
+            _to_wsl_path(script_path),
+            _to_wsl_path(video_path),
+        ]
+    else:
+        print("[INFO] Usando Git Bash para ejecutar transcribir.sh")
+        git_usr_bin = r"C:\Program Files\Git\usr\bin"
+        git_bin = r"C:\Program Files\Git\bin"
+        env["PATH"] = git_usr_bin + os.pathsep + git_bin + os.pathsep + env.get("PATH", "")
+        bash = next(
+            (p for p in [
+                r"C:\Program Files\Git\usr\bin\bash.exe",
+                r"C:\Program Files (x86)\Git\usr\bin\bash.exe",
+            ] if os.path.exists(p)),
+            "bash",
+        )
+        command = [bash, _to_git_bash_path(script_path), _to_git_bash_path(video_path)]
+
+    print(f"[INFO] Ejecutando: {' '.join(command)}")
 
     result = subprocess.run(command, capture_output=True, text=True, env=env)
 

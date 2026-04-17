@@ -10,7 +10,7 @@ WHISPER_BIN="${WHISPER_BIN:-$SCRIPT_DIR/build/bin/whisper-cli}"
 MODEL_PATH="${WHISPER_MODEL:-$SCRIPT_DIR/models/ggml-large-v3-q5_0.bin}"
 LANGUAGE="${WHISPER_LANG:-es}"
 
-SAMPLES_DIR="./samples"
+SAMPLES_DIR="$SCRIPT_DIR/samples"
 TMP_ID=$(basename "$VIDEO_PATH" | cut -d. -f1)
 WAV_PATH="${SAMPLES_DIR}/${TMP_ID}.wav"
 SEGMENTS_FILE="${WAV_PATH}.json"
@@ -48,9 +48,24 @@ fi
 
 # Ejecutar transcripción
 THREADS="${WHISPER_THREADS:-16}"
-"$WHISPER_BIN" -m "$MODEL_PATH" -f "$WAV_PATH" -otxt -osrt -oj -l "$LANGUAGE" -t "$THREADS" > /dev/null 2>&1
+GPU_FLAGS=""
+if [ "${USE_GPU:-0}" = "1" ]; then
+  GPU_FLAGS="-ngl 99"
+fi
+WHISPER_LOG=$("$WHISPER_BIN" -m "$MODEL_PATH" -f "$WAV_PATH" -of "$WAV_PATH" -otxt -osrt -oj -l "$LANGUAGE" -t "$THREADS" $GPU_FLAGS 2>&1)
+WHISPER_EXIT=$?
+
+echo "[DEBUG] whisper-cli exit code: $WHISPER_EXIT" >&2
+echo "[DEBUG] whisper-cli output: $WHISPER_LOG" >&2
+
+if [ $WHISPER_EXIT -ne 0 ]; then
+  echo "{\"error\": \"whisper-cli falló (exit $WHISPER_EXIT): $WHISPER_LOG\"}" >&2
+  exit 1
+fi
 
 if [ ! -f "$SEGMENTS_FILE" ]; then
+  echo "[DEBUG] Archivos en samples dir:" >&2
+  ls -la "$(dirname "$WAV_PATH")" >&2
   echo "{\"error\": \"No se generó el archivo JSON: $SEGMENTS_FILE\"}" >&2
   exit 1
 fi

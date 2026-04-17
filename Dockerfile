@@ -1,5 +1,5 @@
 # ─── BASE ──────────────────────────────────────────────────────────────────────
-FROM ubuntu:22.04
+FROM nvidia/cuda:12.3.1-devel-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 WORKDIR /app
@@ -13,7 +13,7 @@ RUN apt-get update && apt-get install -y \
 
 # ─── COMPILAR WHISPER.CPP ──────────────────────────────────────────────────────
 RUN git clone --depth=1 https://github.com/ggerganov/whisper.cpp.git /tmp/whisper_src && \
-    cmake -S /tmp/whisper_src -B /app/build -DGGML_CUDA=OFF && \
+    cmake -S /tmp/whisper_src -B /app/build -DGGML_CUDA=ON && \
     cmake --build /app/build --config Release && \
     rm -rf /tmp/whisper_src
 
@@ -41,6 +41,7 @@ ENV WHISPER_BIN=/app/build/bin/whisper-cli
 ENV WHISPER_MODEL=/app/models/ggml-large-v3-q5_0.bin
 ENV WHISPER_LANG=es
 ENV PORT=5001
+# GEMINI_API_KEY debe inyectarse en runtime (no hardcodear en la imagen)
 
 # ─── PUERTO ────────────────────────────────────────────────────────────────────
 EXPOSE 5001
